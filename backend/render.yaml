@@ -1,0 +1,42 @@
+# Render blueprint — Ivoire Gaming API (Express + Prisma + SQLite)
+# Déploiement sur Render : https://render.com
+#
+# Ce fichier décrit un service web + un disque persistant.
+# La base SQLite est stockée sur le disque (persistante entre redémarrages).
+
+services:
+  - type: web
+    name: ivoire-gaming-api
+    runtime: node
+    plan: free
+    rootDir: .
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm run prisma:push && npm run seed && node dist/index.js
+    healthCheckPath: /api/home
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        sync: false
+      - key: DATABASE_URL
+        value: file:/data/dev.db
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ACCESS_TOKEN_TTL
+        value: "900"
+      - key: REFRESH_TOKEN_TTL_DAYS
+        value: "7"
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: UPLOAD_DIR
+        value: ./uploads
+      - key: MAX_UPLOAD_MB
+        value: "5"
+      - key: EXPO_PUSH_ENABLED
+        value: "0"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

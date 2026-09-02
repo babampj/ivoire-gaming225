@@ -1,0 +1,166 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-sora), var(--font-space-grotesk), sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+
+  /* Brand palette */
+  --color-carbon: #0b0b14;
+  --color-night: #1a1033;
+  --color-ink: #0d1b2a;
+  --color-orange: #ff7a1a;
+  --color-violet: #7c5cfc;
+  --color-green: #1fa35b;
+  --color-gold: #e8c36b;
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) * 0.7);
+  --radius-md: calc(var(--radius) * 0.85);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.4);
+}
+
+:root {
+  color-scheme: dark;
+  --radius: 1rem;
+
+  --background: #0b0b14;
+  --foreground: #f5f5fa;
+  --muted-foreground: #8e8e9e;
+
+  --card: rgba(255, 255, 255, 0.04);
+  --card-foreground: #f5f5fa;
+  --border: rgba(255, 255, 255, 0.08);
+  --primary: #7c5cfc;
+  --primary-foreground: #f5f5fa;
+  --ring: #7c5cfc;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body,
+  #__next {
+    height: 100%;
+  }
+  html {
+    @apply bg-background;
+    overflow: hidden;
+  }
+  body {
+    @apply bg-background text-foreground;
+    height: 100dvh;
+    overflow: hidden;
+    /* Deep carbon -> night violet / ink blue ambient gradient with top neon halo */
+    background-color: #0b0b14;
+    background-image:
+      radial-gradient(120% 70% at 50% -10%, rgba(124, 92, 252, 0.28) 0%, rgba(124, 92, 252, 0) 55%),
+      radial-gradient(90% 50% at 85% 8%, rgba(255, 122, 26, 0.14) 0%, rgba(255, 122, 26, 0) 50%),
+      linear-gradient(170deg, #0b0b14 0%, #140d26 45%, #0d1b2a 100%);
+    background-attachment: fixed;
+  }
+}
+
+@layer utilities {
+  /* Glassmorphism card with luminous orange->violet gradient border */
+  .glass {
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid transparent;
+    background-clip: padding-box;
+    box-shadow:
+      0 10px 30px -12px rgba(0, 0, 0, 0.7),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  .glass-border {
+    position: relative;
+  }
+  .glass-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(255, 122, 26, 0.7), rgba(124, 92, 252, 0.55) 55%, rgba(255, 255, 255, 0.05));
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .float-badge {
+    filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.55));
+    animation: floaty 4.5s ease-in-out infinite;
+  }
+  @keyframes floaty {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-5px);
+    }
+  }
+
+  .glow-green {
+    box-shadow: 0 0 0 1px rgba(31, 163, 91, 0.5), 0 0 14px rgba(31, 163, 91, 0.55);
+  }
+  .glow-violet {
+    box-shadow: 0 0 18px rgba(124, 92, 252, 0.55);
+  }
+  .glow-orange {
+    box-shadow: 0 0 22px rgba(255, 122, 26, 0.4);
+  }
+
+  /* Pulsing halo for active voice rooms */
+  .pulse-ring {
+    position: relative;
+  }
+  .pulse-ring::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: inherit;
+    border: 2px solid rgba(31, 163, 91, 0.7);
+    animation: pulsering 1.8s ease-out infinite;
+  }
+  @keyframes pulsering {
+    0% {
+      transform: scale(1);
+      opacity: 0.9;
+    }
+    100% {
+      transform: scale(1.35);
+      opacity: 0;
+    }
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

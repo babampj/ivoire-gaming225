@@ -1,0 +1,9 @@
+# Netlify config — Ivoire Gaming frontend (Next.js)
+# IMPORTANT : positionner NEXT_PUBLIC_API_URL dans les variables d'environnement
+# de Netlify (Site settings > Environment variables) sur l'URL publique du backend,
+# ex. https://ivoire-gaming-api.onrender.com
+# Sinon le frontend pointera vers http://localhost:4000 (inaccessible en prod).
+
+[build]
+  command = "npm run build"
+  publish = ".next"

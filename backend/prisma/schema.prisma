@@ -1,0 +1,494 @@
+// ─── Ivoire Gaming — Prisma schema ──────────────────────────────────────────
+// Provider : SQLite en développement local, PostgreSQL en production.
+// À basculer : modifier `provider` + DATABASE_URL (aucun changement de modèle).
+//
+// NB : les énumérations (role, status, types…) sont modélisées en String et
+// contraintes par validation Zod côté serveur pour rester portables SQLite/PG.
+// La contrainte "maximum 3 jeux favoris" est appliquée au niveau service
+// (users.setFavorites) ; en production PostgreSQL on peut ajouter un trigger :
+//   CREATE TRIGGER trg_max_user_games
+//   BEFORE INSERT ON "UserGame"
+//   WHEN (SELECT COUNT(*) FROM "UserGame" WHERE "userId" = NEW."userId") >= 3
+//   BEGIN SELECT RAISE(ABORT, 'maximum 3 jeux favoris'); END;
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Géographie (Côte d'Ivoire, extensible à d'autres pays) ────────────────
+
+model Country {
+  id   String @id @default(cuid())
+  code String @unique
+  name String
+  flag String? // emoji
+  cities City[]
+}
+
+model City {
+  id        String  @id @default(cuid())
+  name      String
+  countryId String
+  country   Country @relation(fields: [countryId], references: [id])
+
+  @@unique([countryId, name])
+}
+
+// ─── Utilisateurs ───────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         String   @default("USER") // USER | MODERATOR | ADMIN
+  avatar       String?
+  bio          String?
+  city         String? // nom de ville (Côte d'Ivoire)
+  birthDate    DateTime?
+  status       String   @default("OFFLINE") // ONLINE | OFFLINE | IN_GAME
+  lastSeen     DateTime?
+
+  // Bannissement
+  banned        Boolean   @default(false)
+  banReason     String?
+  banExpiresAt  DateTime?
+  bannedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  favorites      UserGame[]
+  communities    GameCommunityMember[]
+  sentRequests   FriendRequest[]     @relation("FriendRequestSender")
+  receivedRequests FriendRequest[]   @relation("FriendRequestReceiver")
+  friendships    Friendship[]        @relation("FriendshipUser")
+  friendsOf      Friendship[]        @relation("FriendshipFriend")
+  blockedBy      BlockedUser[]       @relation("Blocker")
+  blocked        BlockedUser[]       @relation("Blocked")
+  sentMessages   Message[]           @relation("MessageSender")
+  receivedMessages Message[]         @relation("MessageReceiver")
+  chatMessages   GameChatMessage[]
+  forums         Forum[]
+  forumPosts     ForumPost[]
+  forumLikes     ForumLike[]
+  eventsOrganized Event[]
+  eventParticipations EventParticipant[]
+  voiceRooms     VoiceRoom[]
+  voiceMemberships VoiceRoomMember[]
+  voiceInvites   VoiceRoomInvite[]
+  groupsOwned    Group[]
+  groupMemberships GroupMember[]
+  groupMessages  GroupMessage[]
+  notifications  Notification[]
+  reportsMade    Report[]   @relation("Reporter")
+  reportsOn      Report[]   @relation("ReportedUser")
+  refreshTokens  RefreshToken[]
+  resetTokens    ResetToken[]
+  pushTokens     PushToken[]
+  privacy        UserPrivacy?
+  announcements  Announcement[]
+}
+
+model UserPrivacy {
+  userId                String  @id
+  user                  User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  showOnline            Boolean @default(true)
+  allowFriendRequests   Boolean @default(true)
+  allowDirectMessages   Boolean @default(true)
+  notificationsEnabled  Boolean @default(true)
+}
+
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String   @default("expo") // expo | fcm | apns
+  createdAt DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revoked   Boolean   @default(false)
+  createdAt DateTime  @default(now())
+}
+
+model ResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  used      Boolean   @default(false)
+  createdAt DateTime  @default(now())
+}
+
+// ─── Jeux & favoris (max 3) ─────────────────────────────────────────────────
+
+model Game {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String? 
+  image       String?
+  icon        String? // emoji court (ex: "🎮")
+  active      Boolean @default(true)
+  createdAt   DateTime @default(now())
+
+  users         UserGame[]
+  communities   GameCommunity?
+  chatMessages  GameChatMessage[]
+  forums        Forum[]
+  events        Event[]
+  voiceRooms    VoiceRoom[]
+}
+
+model UserGame {
+  userId   String
+  gameId   String
+  position Int
+  user     User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game     Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@id([userId, gameId])
+  @@index([userId, position])
+}
+
+// ─── Communautés par jeu (adhésion auto = jeu favori) ──────────────────────
+// Chaque jeu possède AU PLUS UNE communauté. En être membre = avoir ce jeu
+// en favori. La synchro se fait automatiquement dans users.setFavoritesBySlugs
+// (on partage la limite max 3 jeux favoris → max 3 communautés par utilisateur).
+// Le chat du jeu (GameChatMessage) + les salons vocaux tagués y discutent.
+
+model GameCommunity {
+  id       String  @id @default(cuid())
+  gameId   String  @unique
+  name     String? // si vide, on utilise le nom du jeu
+  members  GameCommunityMember[]
+  createdAt DateTime @default(now())
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+}
+
+model GameCommunityMember {
+  communityId String
+  userId      String
+  joinedAt    DateTime @default(now())
+
+  community GameCommunity @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([communityId, userId])
+  @@index([userId])
+}
+
+// ─── Amis / blocage ─────────────────────────────────────────────────────────
+
+model FriendRequest {
+  id         String   @id @default(cuid())
+  senderId   String
+  receiverId String
+  status     String   @default("PENDING") // PENDING | ACCEPTED | DECLINED
+  createdAt  DateTime @default(now())
+
+  sender   User @relation("FriendRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("FriendRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId, status])
+}
+
+model Friendship {
+  id        String   @id @default(cuid())
+  userId    String
+  friendId  String
+  createdAt DateTime @default(now())
+
+  user   User @relation("FriendshipUser", fields: [userId], references: [id], onDelete: Cascade)
+  friend User @relation("FriendshipFriend", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+  @@index([friendId])
+}
+
+model BlockedUser {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+// ─── Messagerie ─────────────────────────────────────────────────────────────
+
+model Message {
+  id         String   @id @default(cuid())
+  senderId   String
+  receiverId String
+  content    String
+  type       String   @default("TEXT") // TEXT | IMAGE
+  imageUrl   String?
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  sender   User @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId, receiverId, createdAt])
+}
+
+model GameChatMessage {
+  id        String   @id @default(cuid())
+  gameId    String
+  senderId  String
+  content   String
+  type      String   @default("TEXT")
+  imageUrl  String?
+  createdAt DateTime @default(now())
+
+  game   Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  sender User @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, createdAt])
+}
+
+// ─── Forum ──────────────────────────────────────────────────────────────────
+
+model Forum {
+  id        String   @id @default(cuid())
+  gameId    String
+  authorId  String
+  title     String
+  content   String
+  pinned    Boolean  @default(false)
+  status    String   @default("OPEN") // OPEN | CLOSED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  game   Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  posts  ForumPost[]
+
+  @@index([gameId, createdAt])
+  @@index([gameId, pinned, createdAt])
+}
+
+model ForumPost {
+  id        String   @id @default(cuid())
+  forumId   String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+
+  forum  Forum @relation(fields: [forumId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  likes  ForumLike[]
+
+  @@index([forumId, createdAt])
+}
+
+model ForumLike {
+  forumPostId String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  post ForumPost @relation(fields: [forumPostId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([forumPostId, userId])
+}
+
+// ─── Événements ─────────────────────────────────────────────────────────────
+
+model Event {
+  id          String    @id @default(cuid())
+  gameId      String?
+  organizerId String
+  title       String
+  description String?
+  image       String?
+  location    String    // ville
+  address     String?
+  startDate   DateTime
+  endDate     DateTime?
+  link        String?
+  status      String    @default("UPCOMING") // UPCOMING | ONGOING | COMPLETED | CANCELLED
+  createdAt   DateTime  @default(now())
+
+  game       Game?              @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  organizer  User               @relation(fields: [organizerId], references: [id], onDelete: Cascade)
+  participants EventParticipant[]
+
+  @@index([gameId, startDate])
+  @@index([location, startDate])
+}
+
+model EventParticipant {
+  eventId   String
+  userId    String
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, userId])
+}
+
+// ─── Salons vocaux ───────────────────────────────────────────────────────────
+
+model VoiceRoom {
+  id          String   @id @default(cuid())
+  gameId      String?
+  ownerId     String
+  name        String
+  description String?
+  isPrivate   Boolean  @default(false)
+  livekitRoom String? // nom de room LiveKit (créé à la demande)
+  createdAt   DateTime @default(now())
+
+  game    Game?             @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  owner   User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members VoiceRoomMember[]
+  invites VoiceRoomInvite[]
+
+  @@index([gameId])
+  @@index([createdAt])
+}
+
+model VoiceRoomMember {
+  roomId   String
+  userId   String
+  isMuted  Boolean  @default(false)
+  joinedAt DateTime @default(now())
+
+  room VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, userId])
+  @@index([userId])
+}
+
+model VoiceRoomInvite {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  invitedBy String
+  createdAt DateTime @default(now())
+
+  room VoiceRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+}
+
+// ─── Groupes d'amis (extensibles en teams esport) ───────────────────────────
+
+model Group {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  avatar      String?
+  ownerId     String
+  mainGameId  String? // réservé pour la future transformation en team esport
+  isTeam      Boolean  @default(false) // devient true quand le groupe est promu en team
+  createdAt   DateTime @default(now())
+
+  owner    User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members  GroupMember[]
+  messages GroupMessage[]
+
+  @@index([createdAt])
+}
+
+model GroupMember {
+  groupId  String
+  userId   String
+  role     String   @default("MEMBER") // OWNER | ADMIN | MEMBER
+  joinedAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+}
+
+model GroupMessage {
+  id        String   @id @default(cuid())
+  groupId   String
+  senderId  String
+  content   String
+  type      String   @default("TEXT")
+  imageUrl  String?
+  createdAt DateTime @default(now())
+
+  group  Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sender User  @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
+}
+
+// ─── Notifications & annonces ───────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String // FRIEND_REQUEST | FRIEND_ACCEPTED | NEW_MESSAGE | INCOMING_CALL
+                   // | GROUP_INVITE | VOICE_INVITE | EVENT_REMINDER | FORUM_REPLY | FORUM_MENTION
+  content   String
+  refType   String? // user | game | forum | event | room | group | message
+  refId     String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  image     String?
+  active    Boolean  @default(true)
+  createdById String?
+  user      User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+}
+
+// ─── Modération ─────────────────────────────────────────────────────────────
+
+model Report {
+  id            String    @id @default(cuid())
+  reporterId    String
+  reportedUserId String?  // si signalement d'un utilisateur
+  contentType   String    // USER | FORUM | POST | MESSAGE | GAME_CHAT | EVENT | ROOM | GROUP
+  contentId     String?
+  reason        String
+  status        String    @default("PENDING") // PENDING | REVIEWED | RESOLVED | DISMISSED
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  reporter  User @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported  User? @relation("ReportedUser", fields: [reportedUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
